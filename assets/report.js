@@ -1,4 +1,8 @@
         const modeSelect = document.getElementById('report-mode-select');
+        const factionFilters = Array.from(
+            document.querySelectorAll('[data-faction-filter]'));
+        const chartFactionFilters = Array.from(
+            document.querySelectorAll('[data-chart-faction]'));
         const encounterChart = document.getElementById('encounter-chart');
         const encounterDurationSeconds = Number(encounterChart.dataset.duration);
         const encounterStartEpoch = Number(encounterChart.dataset.startEpoch);
@@ -127,7 +131,10 @@
                                 return items.length ? clockTextAt(items[0].parsed.x) : '';
                             },
                             label: function (item) {
-                                return Math.round(item.parsed.y).toLocaleString('en-US') +
+                                const faction = item.dataset.label
+                                    ? item.dataset.label + ': ' : '';
+                                return faction +
+                                    Math.round(item.parsed.y).toLocaleString('en-US') +
                                     (modeSelect.value === 'healing' ? ' HPS' : ' DPS');
                             }
                         }
@@ -175,6 +182,36 @@
             });
             return values;
         };
+        const createSeriesStats = function (series) {
+            const times = [];
+            const totals = [0];
+            const activeCounts = [0];
+            series.forEach(function (entry) {
+                times.push(entry[0]);
+                totals.push(totals[totals.length - 1] + entry[1]);
+                activeCounts.push(activeCounts[activeCounts.length - 1] +
+                    (entry[1] > 0 ? 1 : 0));
+            });
+            return {times: times, totals: totals, activeCounts: activeCounts};
+        };
+        const lowerBoundTime = function (times, value) {
+            let low = 0;
+            let high = times.length;
+            while (low < high) {
+                const middle = low + Math.floor((high - low) / 2);
+                if (times[middle] < value) low = middle + 1;
+                else high = middle;
+            }
+            return low;
+        };
+        const seriesRange = function (stats, start, end) {
+            const first = lowerBoundTime(stats.times, start);
+            const last = lowerBoundTime(stats.times, end);
+            return {
+                total: stats.totals[last] - stats.totals[first],
+                activeCount: stats.activeCounts[last] - stats.activeCounts[first]
+            };
+        };
         const aggregateSeries = function (encoded, sampleCount) {
             const buckets = Array(sampleCount).fill(0);
             parseSeries(encoded).forEach(function (entry) {
@@ -184,34 +221,37 @@
             });
             return buckets;
         };
-        const totalDamageBuckets = aggregateSeries(
-            encounterChart.dataset.damageSeries, chartSampleCount);
-        const totalHealingBuckets = aggregateSeries(
-            encounterChart.dataset.healingSeries, chartSampleCount);
         const chartBinDuration = encounterDurationSeconds / chartSampleCount;
-        const totalDamageRates = smoothRates(totalDamageBuckets.map(function (amount) {
-            return amount / chartBinDuration;
-        }));
-        const totalHealingRates = smoothRates(totalHealingBuckets.map(function (amount) {
-            return amount / chartBinDuration;
-        }));
+        const factionColors = {
+            East: '#C83232',
+            West: '#3678C8',
+            Pirate: '#8E44AD'
+        };
+        const factionRates = {damage: {}, healing: {}};
+        chartFactionFilters.forEach(function (filter) {
+            const faction = filter.dataset.chartFaction;
+            ['damage', 'healing'].forEach(function (mode) {
+                const buckets = aggregateSeries(
+                    encounterChart.dataset[
+                        faction.toLowerCase() +
+                        mode[0].toUpperCase() + mode.slice(1) + 'Series'],
+                    chartSampleCount);
+                factionRates[mode][faction] = smoothRates(
+                    buckets.map(function (amount) {
+                        return amount / chartBinDuration;
+                    }));
+            });
+        });
         const updateHeaderChart = function (viewMode) {
             const healing = viewMode === 'healing';
-            const rates = healing ? totalHealingRates : totalDamageRates;
             const canvas = document.getElementById('encounter-chart-canvas');
-            const color = healing ? '#d392d4' : '#67D9FF';
+            document.querySelector('.encounter-faction-filters').classList.toggle(
+                'healing-faction-chart', healing);
             let chart = playerCharts.get(canvas);
             if (!chart) {
                 chart = new Chart(canvas, {
                     type: 'line',
-                    data: {datasets: [{
-                        data: [],
-                        borderColor: color,
-                        backgroundColor: color,
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        tension: 0.2
-                    }]},
+                    data: {datasets: []},
                     options: chartOptions(true)
                 });
                 playerCharts.set(canvas, chart);
@@ -252,26 +292,59 @@
                     event.preventDefault();
                 });
             }
-            chart.data.datasets[0].data = makeChartPoints(
-                rates, encounterDurationSeconds, 0);
-            chart.data.datasets[0].borderColor = color;
-            chart.data.datasets[0].backgroundColor = color;
+            const mode = healing ? 'healing' : 'damage';
+            chart.data.datasets = chartFactionFilters
+                    .filter(function (filter) {
+                        return filter.checked && !filter.closest('label').hidden &&
+                            filter.dataset['chart' +
+                                mode[0].toUpperCase() + mode.slice(1)] === 'true';
+                    })
+                    .map(function (filter) {
+                        const faction = filter.dataset.chartFaction;
+                        const color = factionColors[faction];
+                        return {
+                            label: faction,
+                            data: makeChartPoints(
+                                factionRates[mode][faction], encounterDurationSeconds, 0),
+                            borderColor: color,
+                            backgroundColor: color,
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            tension: 0.2
+                        };
+                    });
             chart.update('none');
             canvas.setAttribute(
                 'aria-label', healing
-                    ? 'Total HPS across the encounter'
-                    : 'Total DPS across the encounter');
+                    ? 'Total healing per second across the encounter'
+                    : 'Faction DPS across the encounter');
         };
         const allRows = {
             damage: Array.from(document.querySelectorAll('#damage-view tr.player-row')),
             healing: Array.from(document.querySelectorAll('#healing-view tr.player-row'))
         };
         const rowSeries = new Map();
+        const rowSeriesStats = new Map();
         Object.values(allRows).forEach(function (rows) {
             rows.forEach(function (row) {
-                rowSeries.set(row, parseSeries(row.dataset.series));
+                const series = parseSeries(row.dataset.series);
+                rowSeries.set(row, series);
+                rowSeriesStats.set(row, createSeriesStats(series));
             });
         });
+        const elementSeriesStats = new WeakMap();
+        const getElementSeriesStats = function (element, key) {
+            let statsByKey = elementSeriesStats.get(element);
+            if (!statsByKey) {
+                statsByKey = {};
+                elementSeriesStats.set(element, statsByKey);
+            }
+            if (!statsByKey[key]) {
+                statsByKey[key] = createSeriesStats(
+                    parseSeries(element.dataset[key]));
+            }
+            return statsByKey[key];
+        };
         const numberText = function (value) {
             return Math.round(value).toLocaleString('en-US').replace(/,/g, ' ');
         };
@@ -283,20 +356,20 @@
         const updateBreakdownValues = function (row, start, end) {
             const breakdown = document.getElementById(
                 row.querySelector('.toggle-breakdown').dataset.target);
-            if (!breakdown) return;
+            if (!breakdown || breakdown.hidden) return;
             const updateGroup = function (selector) {
                 const items = Array.from(breakdown.querySelectorAll(selector));
                 const values = items.map(function (item) {
-                    const total = parseSeries(item.dataset.series).reduce(function (sum, entry) {
-                        return entry[0] >= start && entry[0] < end ? sum + entry[1] : sum;
-                    }, 0);
-                    return {item: item, total: total};
+                    const range = seriesRange(
+                        getElementSeriesStats(item, 'series'), start, end);
+                    return {item: item, total: range.total};
                 });
                 const groupTotal = values.reduce(function (sum, value) {
                     return sum + value.total;
                 }, 0);
                 values.forEach(function (value) {
                     const item = value.item;
+                    item.hidden = value.total <= 0;
                     const amount = item.querySelector('.breakdown-amount');
                     if (item.dataset.kind === 'uptime') {
                         amount.textContent = value.total.toFixed(1) +
@@ -318,17 +391,14 @@
             if (!section) return;
             const rows = Array.from(section.querySelectorAll('.twisted-spear-row')).map(
                 function (row) {
-                    const sumRange = function (series) {
-                        return parseSeries(series).reduce(function (sum, entry) {
-                            return entry[0] >= start && entry[0] < end
-                                ? sum + entry[1] : sum;
-                        }, 0);
-                    };
                     return {
                         row: row,
-                        damage: sumRange(row.dataset.series),
-                        hits: sumRange(row.dataset.hitSeries),
-                        healing: sumRange(row.dataset.healingSeries)
+                        damage: seriesRange(
+                            getElementSeriesStats(row, 'series'), start, end).total,
+                        hits: seriesRange(
+                            getElementSeriesStats(row, 'hitSeries'), start, end).total,
+                        healing: seriesRange(
+                            getElementSeriesStats(row, 'healingSeries'), start, end).total
                     };
                 });
             rows.sort(function (left, right) {
@@ -343,10 +413,8 @@
             const totalHealing = rows.reduce(function (sum, item) {
                 return sum + item.healing;
             }, 0);
-            const unattributedHealing = parseSeries(
-                section.dataset.unattributedSeries).reduce(function (sum, entry) {
-                    return entry[0] >= start && entry[0] < end ? sum + entry[1] : sum;
-                }, 0);
+            const unattributedHealing = seriesRange(
+                getElementSeriesStats(section, 'unattributedSeries'), start, end).total;
             let playersHit = 0;
             const tbody = section.querySelector('.twisted-spear-table tbody');
             rows.forEach(function (item) {
@@ -374,6 +442,35 @@
             document.getElementById('twisted-spear-damage-total').textContent =
                 numberText(totalDamage);
         };
+        const updateFactionPlayerCounts = function (start, end) {
+            const players = new Map();
+            Object.values(allRows).forEach(function (rows) {
+                rows.forEach(function (row) {
+                    const name = row.querySelector('.player-name').textContent
+                        .trim().toLocaleLowerCase();
+                    let faction = 'Uncategorized';
+                    if (row.classList.contains('faction-east')) faction = 'East';
+                    else if (row.classList.contains('faction-west')) faction = 'West';
+                    else if (row.classList.contains('faction-pirate')) faction = 'Pirate';
+                    let player = players.get(name);
+                    if (!player) {
+                        player = {faction: faction, active: false};
+                        players.set(name, player);
+                    }
+                    if (seriesRange(rowSeriesStats.get(row), start, end).activeCount > 0) {
+                        player.active = true;
+                    }
+                });
+            });
+            const counts = {East: 0, West: 0, Pirate: 0, Uncategorized: 0};
+            players.forEach(function (player) {
+                if (player.active) counts[player.faction] += 1;
+            });
+            document.getElementById('boss-faction-counts').textContent =
+                'East: ' + counts.East + ' | West: ' + counts.West +
+                ' | Pirate: ' + counts.Pirate +
+                ' | Uncategorized: ' + counts.Uncategorized;
+        };
         const formatDuration = function (seconds) {
             const minutes = Math.floor(seconds / 60);
             const remainder = seconds % 60;
@@ -383,7 +480,7 @@
         const renderPlayerChart = function (row, start, end) {
             const breakdown = document.getElementById(
                 row.querySelector('.toggle-breakdown').dataset.target);
-            if (!breakdown) return;
+            if (!breakdown || breakdown.hidden) return;
             const canvas = breakdown.querySelector('.player-chart-canvas');
             if (!canvas) return;
             const duration = Math.max(1, end - start);
@@ -430,44 +527,73 @@
             const selectedDuration = Math.max(1, end - start);
             const viewMode = modeSelect.value === 'healing' ? 'healing' : 'damage';
             updateHeaderChart(viewMode);
+            updateFactionPlayerCounts(start, end);
             updateTwistedSpearBreakdown(start, end);
-            let reportTotal = 0;
             const rowValues = allRows[viewMode].map(function (row) {
-                let amount = 0;
-                let activeSeconds = 0;
-                rowSeries.get(row).forEach(function (entry) {
-                    if (entry[0] >= start && entry[0] < end) {
-                        amount += entry[1];
-                        if (entry[1] > 0) activeSeconds += 1;
-                    }
-                });
-                reportTotal += amount;
-                return {row: row, amount: amount, activeSeconds: activeSeconds};
+                const range = seriesRange(rowSeriesStats.get(row), start, end);
+                return {
+                    row: row,
+                    amount: range.total,
+                    activeSeconds: range.activeCount
+                };
             });
+            const visibleFactionFilters = new Set(factionFilters
+                .filter(function (filter) { return filter.checked; })
+                .map(function (filter) { return filter.dataset.factionFilter; }));
+            const isFactionVisible = function (row) {
+                if (row.classList.contains('faction-east')) {
+                    return visibleFactionFilters.has('East');
+                }
+                if (row.classList.contains('faction-west')) {
+                    return visibleFactionFilters.has('West');
+                }
+                if (row.classList.contains('faction-pirate')) {
+                    return visibleFactionFilters.has('Pirate');
+                }
+                return visibleFactionFilters.has('Uncategorized');
+            };
             rowValues.sort(function (left, right) {
                 if (left.amount !== right.amount) return right.amount - left.amount;
                 return left.row.querySelector('.player-name').textContent.localeCompare(
                     right.row.querySelector('.player-name').textContent);
             });
-            document.getElementById('player-count').textContent = rowValues.length;
+            const visibleRows = rowValues.filter(function (item) {
+                return item.activeSeconds > 0 && isFactionVisible(item.row);
+            });
+            const reportTotal = visibleRows.reduce(function (total, item) {
+                return total + item.amount;
+            }, 0);
+            document.getElementById('total-amount').textContent = numberText(reportTotal);
             const tbody = document.querySelector(
                 viewMode === 'healing' ? '#healing-view tbody' : '#damage-view tbody');
-            rowValues.forEach(function (item, index) {
+            let visibleRank = 0;
+            rowValues.forEach(function (item) {
                 const row = item.row;
                 const share = reportTotal > 0 ? item.amount / reportTotal * 100 : 0;
-                row.querySelector('.rank-value').textContent = index + 1;
                 row.querySelector('.contribution-value').textContent = share.toFixed(2) + '%';
                 row.querySelector('.contribution-bar').style.width =
                     Math.max(0, Math.min(100, share)).toFixed(2) + '%';
                 row.querySelector('.player-total').textContent = numberText(item.amount);
                 row.querySelector('.player-rate').textContent =
                     shortNumberText(item.amount / selectedDuration);
-                row.querySelector('.player-uptime').textContent =
-                    (item.activeSeconds / selectedDuration * 100).toFixed(1) + '%';
+                row.dataset.uptime =
+                    (item.activeSeconds / selectedDuration * 100).toFixed(1);
                 renderPlayerChart(row, start, end);
                 updateBreakdownValues(row, start, end);
                 const breakdown = document.getElementById(
                     row.querySelector('.toggle-breakdown').dataset.target);
+                const visible = item.activeSeconds > 0 && isFactionVisible(row);
+                row.hidden = !visible;
+                if (breakdown && !visible) {
+                    breakdown.hidden = true;
+                    const toggle = row.querySelector('.toggle-breakdown');
+                    toggle.setAttribute('aria-expanded', 'false');
+                    toggle.textContent = '+';
+                }
+                if (visible) {
+                    visibleRank += 1;
+                    row.querySelector('.rank-value').textContent = visibleRank;
+                }
                 tbody.appendChild(row);
                 if (breakdown) tbody.appendChild(breakdown);
             });
@@ -482,6 +608,15 @@
             root.querySelectorAll('canvas').forEach(function (canvas) {
                 const chart = playerCharts.get(canvas);
                 if (chart) chart.resize();
+            });
+        };
+        let encounterViewUpdateRequested = false;
+        const scheduleEncounterViewUpdate = function () {
+            if (encounterViewUpdateRequested) return;
+            encounterViewUpdateRequested = true;
+            window.requestAnimationFrame(function () {
+                encounterViewUpdateRequested = false;
+                updateEncounterView();
             });
         };
         document.querySelectorAll('.encounter-range-control input[type="range"]')
@@ -503,7 +638,7 @@
                 }
                 startSlider.value = start;
                 endSlider.value = end;
-                updateEncounterView();
+                scheduleEncounterViewUpdate();
             });
         });
         document.querySelectorAll('.encounter-time-input').forEach(function (input) {
@@ -548,6 +683,14 @@
                     healing ? 'healing-view' : 'damage-view'));
             });
         });
+        factionFilters.forEach(function (filter) {
+            filter.addEventListener('change', updateEncounterView);
+        });
+        chartFactionFilters.forEach(function (filter) {
+            filter.addEventListener('change', function () {
+                updateHeaderChart(modeSelect.value);
+            });
+        });
         updateEncounterView();
         document.addEventListener('click', function (event) {
             const toggle = event.target.closest('.toggle-breakdown');
@@ -564,6 +707,10 @@
             target.hidden = isExpanded;
             if (!isExpanded) {
                 window.requestAnimationFrame(function () {
+                    const start = Number(startSlider.value);
+                    const end = Number(endSlider.value);
+                    updateBreakdownValues(toggle.closest('tr.player-row'), start, end);
+                    renderPlayerChart(toggle.closest('tr.player-row'), start, end);
                     resizeCharts(target);
                 });
             }

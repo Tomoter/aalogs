@@ -2,7 +2,7 @@
     "use strict";
 
     const script = document.currentScript;
-    const reportsPath = (script?.dataset.reportsPath || "releasebuild/output/reports")
+    const reportsPath = (script?.dataset.reportsPath || "reports")
         .replace(/^\/+|\/+$/g, "");
     const ownerOverride = script?.dataset.owner || "";
     const repositoryOverride = script?.dataset.repository || "";
@@ -28,20 +28,19 @@
         }
         const hostSuffix = ".github.io";
         const hostname = location.hostname.toLowerCase();
-        if (!hostname.endsWith(hostSuffix)) {
-            throw new Error(
-                "Could not infer the GitHub repository from this site URL. " +
-                "Set data-owner and data-repository on the pages-index.js script element.",
-            );
+        if (hostname.endsWith(hostSuffix)) {
+            const owner = hostname.slice(0, -hostSuffix.length);
+            const pathSegments = location.pathname.split("/").filter(Boolean);
+            const repository = repositoryOverride ||
+                (pathSegments.length ? decodeURIComponent(pathSegments[0]) : `${owner}.github.io`);
+            if (owner && repository) {
+                return { owner, repository };
+            }
         }
-        const owner = hostname.slice(0, -hostSuffix.length);
-        const pathSegments = location.pathname.split("/").filter(Boolean);
-        const repository = repositoryOverride ||
-            (pathSegments.length ? decodeURIComponent(pathSegments[0]) : `${owner}.github.io`);
-        if (!owner || !repository) {
-            throw new Error("The GitHub Pages URL does not identify a repository.");
-        }
-        return { owner, repository };
+        throw new Error(
+            "Could not infer the GitHub repository from this site URL. " +
+            "Set data-owner and data-repository on the pages-index.js script element.",
+        );
     }
 
     async function fetchJson(url, description) {
@@ -100,30 +99,29 @@
 
     function folderDate(folderName) {
         const match =
-            /^(?:report|previous)-(\d{4}-\d{2}-\d{2})_(\d{2}):(\d{2}):\d{2}-\d+$/
+            /^(?:report|previous)-(\d{4}-\d{2}-\d{2})_(\d{2})[:-](\d{2})[:-]\d+.*$/
                 .exec(folderName);
         return match ? `${match[1]} ${match[2]}:${match[3]}:00` : "";
     }
 
     async function loadMetadata(info, reportPath, folderName) {
         const metadataPath = `${reportPath}/report.json`;
+        try {
+            const sameOriginResp = await fetch(encodePath(metadataPath), { cache: "no-store" });
+            if (sameOriginResp.ok) {
+                return await sameOriginResp.json();
+            }
+        } catch {}
         const url = `https://raw.githubusercontent.com/${encodeURIComponent(info.owner)}/` +
             `${encodeURIComponent(info.repository)}/${encodePath(info.ref)}/` +
             `${encodePath(metadataPath)}`;
-        const response = await fetch(url, { cache: "no-store" });
-        if (response.status === 404) {
-            return {};
-        }
-        if (!response.ok) {
-            throw new Error(
-                `Could not load metadata for ${folderName} (HTTP ${response.status}).`,
-            );
-        }
         try {
-            return await response.json();
-        } catch {
-            throw new Error(`Report metadata for ${folderName} is not valid JSON.`);
-        }
+            const response = await fetch(url, { cache: "no-store" });
+            if (response.ok) {
+                return await response.json();
+            }
+        } catch {}
+        return {};
     }
 
     async function loadReports(info) {
@@ -137,34 +135,51 @@
             );
         }
 
-        const prefix = `${reportsPath}/`;
+        const prefix = reportsPath ? `${reportsPath}/` : "";
         const reportsByDirectory = new Map();
         for (const item of tree.tree || []) {
-            if (item.type !== "blob" || !item.path.startsWith(prefix)) {
+            if (item.type !== "blob" || !/\.html?$/i.test(item.path)) {
                 continue;
             }
-            const relative = item.path.slice(prefix.length);
-            const separator = relative.indexOf("/");
-            if (separator <= 0) {
+            let folder = "";
+            let filename = "";
+            let folderPath = "";
+            if (prefix && item.path.startsWith(prefix)) {
+                const relative = item.path.slice(prefix.length);
+                const separator = relative.indexOf("/");
+                if (separator > 0) {
+                    folder = relative.slice(0, separator);
+                    filename = relative.slice(separator + 1);
+                    if (!filename.includes("/")) {
+                        folderPath = `${prefix}${folder}`;
+                    }
+                }
+            }
+            if (!folder) {
+                const match = /(?:^|\/)(report-[^\/]+|previous-[^\/]+)\/([^\/]+\.html?)$/i.exec(item.path);
+                if (match) {
+                    folder = match[1];
+                    filename = match[2];
+                    folderPath = item.path.slice(0, item.path.length - filename.length - 1);
+                }
+            }
+            if (!folder || !filename) {
                 continue;
             }
-            const folder = relative.slice(0, separator);
-            const filename = relative.slice(separator + 1);
-            if (filename.includes("/") || !/\.html?$/i.test(filename)) {
-                continue;
+            const key = folderPath || folder;
+            if (!reportsByDirectory.has(key)) {
+                reportsByDirectory.set(key, { folder, folderPath: key, htmlFiles: [] });
             }
-            if (!reportsByDirectory.has(folder)) {
-                reportsByDirectory.set(folder, []);
-            }
-            reportsByDirectory.get(folder).push({ filename, path: item.path });
+            reportsByDirectory.get(key).htmlFiles.push({ filename, path: item.path });
         }
 
         const reports = [];
-        for (const [folder, htmlFiles] of reportsByDirectory) {
-            const reportPath = `${prefix}${folder}`;
-            const metadata = await loadMetadata(info, reportPath, folder);
+        for (const [, group] of reportsByDirectory) {
+            const folder = group.folder;
+            const folderPath = group.folderPath;
+            const metadata = await loadMetadata(info, folderPath, folder);
             const reportDate = metadata.dateTime || folderDate(folder);
-            const sortedFiles = htmlFiles.sort((left, right) =>
+            const sortedFiles = group.htmlFiles.sort((left, right) =>
                 (left.filename.toLowerCase() === "index.html" ? -1 : 0) -
                 (right.filename.toLowerCase() === "index.html" ? -1 : 0) ||
                 left.filename.localeCompare(right.filename));
@@ -175,8 +190,7 @@
                     date: formatDate(reportDate),
                     uploaded: formatDate(metadata.uploadedAt || ""),
                     uploader: metadata.uploaderName || "Beefstew",
-                    href: `reports/${file.path.slice(reportsPath.length + 1)
-                        .split("/").map(encodeURIComponent).join("/")}`,
+                    href: encodePath(file.path),
                     sortDate: reportDate,
                 });
             }
@@ -240,14 +254,20 @@
                 `Updated ${new Date().toLocaleTimeString()}.`,
             );
         } catch (error) {
-            results.replaceChildren();
-            const message = document.createElement("p");
-            message.className = "empty";
-            message.textContent = error instanceof Error
-                ? error.message
-                : "Could not load reports from GitHub.";
-            results.append(message);
-            setStatus("Report list could not be refreshed.");
+            const hasExisting = Boolean(results.querySelector(".report-entry"));
+            if (!hasExisting) {
+                results.replaceChildren();
+                const message = document.createElement("p");
+                message.className = "empty";
+                message.textContent = error instanceof Error
+                    ? error.message
+                    : "Could not load reports from GitHub.";
+                results.append(message);
+                setStatus("Report list could not be refreshed.");
+            } else {
+                const count = results.querySelectorAll(".report-entry").length;
+                setStatus(`Showing ${count} saved report${count === 1 ? "" : "s"}.`);
+            }
             console.error("GitHub Pages report index:", error);
         } finally {
             refreshing = false;
@@ -260,6 +280,13 @@
         return;
     }
     refreshButton.addEventListener("click", refresh);
-    void refresh();
-    window.setInterval(refresh, 5 * 60 * 1000);
+    if (location.protocol === "file:") {
+        const count = results.querySelectorAll(".report-entry").length;
+        setStatus(count > 0
+            ? `Showing ${count} local report${count === 1 ? "" : "s"}.`
+            : "No local reports found in this folder.");
+    } else {
+        void refresh();
+        window.setInterval(refresh, 5 * 60 * 1000);
+    }
 })();

@@ -87,7 +87,7 @@
                 const context = chart.ctx;
                 context.save();
                 context.strokeStyle = '#edf3f8';
-                context.lineWidth = 1;
+                context.lineWidth = 3;
                 [encounterSelectionStart, encounterSelectionEnd].forEach(
                     function (value) {
                         const x = scale.getPixelForValue(value);
@@ -257,8 +257,8 @@
                     const clickedOffset = scale.getValueForPixel(positionX);
                     const startX = scale.getPixelForValue(encounterSelectionStart);
                     const endX = scale.getPixelForValue(encounterSelectionEnd);
-                    const nearStart = Math.abs(positionX - startX) <= 9;
-                    const nearEnd = Math.abs(positionX - endX) <= 9;
+                    const nearStart = Math.abs(positionX - startX) <= 14;
+                    const nearEnd = Math.abs(positionX - endX) <= 14;
                     draggedSelectionBound = event.button === 2
                         ? 'end'
                         : (nearStart && (!nearEnd ||

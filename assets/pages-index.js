@@ -178,7 +178,8 @@
             const folder = group.folder;
             const folderPath = group.folderPath;
             const metadata = await loadMetadata(info, folderPath, folder);
-            const reportDate = metadata.dateTime || folderDate(folder);
+            const reportDate = metadata.dateTime || folderDate(folder) || "";
+            const uploadDate = metadata.uploadedAt || folderDate(folder) || "";
             const sortedFiles = group.htmlFiles.sort((left, right) =>
                 (left.filename.toLowerCase() === "index.html" ? -1 : 0) -
                 (right.filename.toLowerCase() === "index.html" ? -1 : 0) ||
@@ -188,15 +189,25 @@
                     folder,
                     name: metadata.reportName || folder,
                     date: formatDate(reportDate),
-                    uploaded: formatDate(metadata.uploadedAt || ""),
+                    uploaded: formatDate(uploadDate),
                     uploader: metadata.uploaderName || "Beefstew",
                     href: encodePath(file.path),
                     sortDate: reportDate,
+                    sortUploaded: uploadDate,
                 });
             }
         }
-        return reports.sort((left, right) =>
-            right.sortDate.localeCompare(left.sortDate));
+        return reports.sort((left, right) => {
+            const dateCmp = (right.sortDate || "").localeCompare(left.sortDate || "");
+            if (dateCmp !== 0) {
+                return dateCmp;
+            }
+            const uploadCmp = (right.sortUploaded || "").localeCompare(left.sortUploaded || "");
+            if (uploadCmp !== 0) {
+                return uploadCmp;
+            }
+            return (right.folder || "").localeCompare(left.folder || "");
+        });
     }
 
     function renderReports(reports) {

@@ -25,6 +25,12 @@
         .encounter-chart-controls { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:2px; }
         .encounter-range-control { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:7px; }
         .encounter-range-control input { width:100%; height:14px; margin:0; accent-color:#dce5ee; cursor:pointer; }
+        .encounter-range-control input[type="range"] { appearance:none; -webkit-appearance:none; height:14px; padding:0; background:transparent; }
+        .encounter-range-control input[type="range"]::-webkit-slider-runnable-track { height:4px; background:#374151; border:1px solid rgba(255,255,255,.12); border-radius:0; }
+        .encounter-range-control input[type="range"]::-webkit-slider-thumb { width:12px; height:12px; margin-top:-5px; appearance:none; -webkit-appearance:none; background:#dce5ee; border:1px solid #0d1116; border-radius:0; }
+        .encounter-range-control input[type="range"]::-moz-range-track { height:4px; background:#374151; border:1px solid rgba(255,255,255,.12); border-radius:0; }
+        .encounter-range-control input[type="range"]::-moz-range-thumb { width:10px; height:10px; background:#dce5ee; border:1px solid #0d1116; border-radius:0; }
+        .encounter-range-control input[type="range"]:focus-visible { outline:1px solid #9aa8b5; outline-offset:2px; }
         .encounter-range-control .encounter-time-input { width:78px; height:22px; padding:1px 3px; color:var(--text); background:#161b22; border:1px solid var(--line-strong); border-radius:2px; font:inherit; font-size:10px; font-variant-numeric:tabular-nums; cursor:text; color-scheme:dark; }
         .encounter-range-control .encounter-time-input:focus { outline:none; border-color:#58a6ff; }
         .twisted-spear-breakdown { margin:10px 10px 12px; padding:10px; background:#151c22; border:1px solid var(--line); }

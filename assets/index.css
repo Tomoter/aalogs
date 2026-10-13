@@ -58,6 +58,34 @@ body {
     list-style: none;
 }
 
+.report-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.report-controls button {
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    padding: 5px 9px;
+    background: #1a2127;
+    color: var(--text);
+    cursor: pointer;
+}
+
+.report-controls button:hover:not(:disabled) {
+    border-color: #67d9ff;
+}
+
+.report-controls button:disabled {
+    cursor: wait;
+    opacity: .65;
+}
+
 .report-entry {
     padding: 12px;
     border-bottom: 1px solid var(--line);

@@ -904,15 +904,15 @@
             });
         });
         updateEncounterView();
-        let archerSoundPlayed = false;
+        let rinSoundPlayed = false;
         document.addEventListener('click', function (event) {
-            if (archerSoundPlayed || !(event.target instanceof Element) ||
-                !event.target.closest('.class-icon[data-class="archer"]')) return;
-            archerSoundPlayed = true;
+            if (rinSoundPlayed || !(event.target instanceof Element) ||
+                !event.target.closest('.class-icon[data-player="rin"]')) return;
+            rinSoundPlayed = true;
             const playback = new Audio('../../snd/miger.mp3').play();
             if (playback && typeof playback.catch === 'function') {
                 playback.catch(function (error) {
-                    console.error('Could not play the Archer click sound.', error);
+                    console.error('Could not play the Rin click sound.', error);
                 });
             }
         });

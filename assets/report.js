@@ -564,6 +564,28 @@
                 return total + item.amount;
             }, 0);
             document.getElementById('total-amount').textContent = numberText(reportTotal);
+            let eastTotal = 0;
+            let westTotal = 0;
+            let pirateTotal = 0;
+            visibleRows.forEach(function (item) {
+                if (item.row.classList.contains('faction-east')) {
+                    eastTotal += item.amount;
+                } else if (item.row.classList.contains('faction-west')) {
+                    westTotal += item.amount;
+                } else if (item.row.classList.contains('faction-pirate')) {
+                    pirateTotal += item.amount;
+                }
+            });
+            const eastAmountEl = document.getElementById('total-east-amount');
+            if (eastAmountEl) eastAmountEl.textContent = numberText(eastTotal);
+            const westAmountEl = document.getElementById('total-west-amount');
+            if (westAmountEl) westAmountEl.textContent = numberText(westTotal);
+            const pirateAmountEl = document.getElementById('total-pirate-amount');
+            if (pirateAmountEl) pirateAmountEl.textContent = numberText(pirateTotal);
+            const pirateRowEl = document.getElementById('total-pirate-row');
+            if (pirateRowEl) {
+                pirateRowEl.hidden = !visibleFactionFilters.has('Pirate');
+            }
             const tbody = document.querySelector(
                 viewMode === 'healing' ? '#healing-view tbody' : '#damage-view tbody');
             let visibleRank = 0;

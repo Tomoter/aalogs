@@ -8,8 +8,12 @@
         .boss-time { color:var(--muted); font-size:10px; font-weight:500; letter-spacing:0; text-transform:none; }
         .boss-faction-counts { color:var(--muted); font-size:9px; font-weight:500; letter-spacing:0; line-height:1.35; text-transform:none; font-variant-numeric:tabular-nums; }
         .boss-meta { grid-column:2; justify-self:center; color:var(--muted); font-weight:700; letter-spacing:.05em; white-space:nowrap; }
-        .boss-total { grid-column:3; justify-self:end; white-space:nowrap; }
+        .boss-total { grid-column:3; justify-self:end; display:flex; flex-direction:column; align-items:flex-end; gap:2px; white-space:nowrap; text-align:right; }
+        .boss-total-main { white-space:nowrap; }
         .boss-total-label { color:#fff; font-weight:800; }
+        .boss-faction-breakdown { display:flex; flex-direction:column; align-items:flex-end; gap:1px; }
+        .boss-faction-total { color:var(--muted); font-size:9px; font-weight:500; letter-spacing:0; line-height:1.35; text-transform:none; font-variant-numeric:tabular-nums; }
+        .boss-faction-total span { color:#edf3f8; font-weight:600; }
         .boss-duration { grid-column:1/-1; text-align:center; color:var(--text); font-size:14px; font-weight:700; letter-spacing:.02em; padding-top:2px; }
         .encounter-chart { grid-column:1/-1; min-width:0; padding:0 8px 5px; color:var(--muted); font-size:10px; font-weight:500; letter-spacing:0; text-transform:none; }
         .encounter-faction-filters { display:flex; align-items:center; justify-content:center; gap:12px; margin:2px 0 5px; }

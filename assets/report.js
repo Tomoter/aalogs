@@ -1,6 +1,7 @@
         const modeSelect = document.getElementById('report-mode-select');
         const factionFilters = Array.from(
             document.querySelectorAll('[data-faction-filter]'));
+        const abilitySearch = document.getElementById('ability-search');
         const chartFactionFilters = Array.from(
             document.querySelectorAll('[data-chart-faction]'));
         const encounterChart = document.getElementById('encounter-chart');
@@ -364,95 +365,161 @@
         targetBreakdownTooltip.setAttribute('role', 'tooltip');
         targetBreakdownTooltip.hidden = true;
         document.body.appendChild(targetBreakdownTooltip);
-        let activeTargetBreakdownItem = null;
-        let activeTargetBreakdownAnchor = null;
-        const showTargetBreakdownTooltip = function (item, anchor) {
-            activeTargetBreakdownItem = item;
-            activeTargetBreakdownAnchor = anchor;
-            const abilities = JSON.parse(item.dataset.abilities || '[]');
+        let activeBreakdownTooltipItem = null;
+        let activeBreakdownTooltipAnchor = null;
+        const showBreakdownTooltip = function (item, anchor) {
+            activeBreakdownTooltipItem = item;
+            activeBreakdownTooltipAnchor = anchor;
+            const isAbility = item.dataset.tooltipKind === 'ability';
+            const action = item.dataset.tooltipAction || 'damage';
+            const entries = JSON.parse(isAbility
+                ? item.dataset.targets || '[]'
+                : item.dataset.abilities || '[]');
             targetBreakdownTooltip.replaceChildren();
             const heading = document.createElement('div');
             heading.className = 'target-breakdown-tooltip-heading';
-            heading.textContent = item.dataset.targetName + ' damage by ability';
+            heading.textContent = isAbility
+                ? item.dataset.tooltipName + ' ' + action + ' breakdown'
+                : item.dataset.targetName + ' ' +
+                    (action === 'healing' ? 'healing received' : 'damage taken') +
+                    ' by ability';
             targetBreakdownTooltip.appendChild(heading);
 
-            const visibleAbilities = abilities.map(function (ability) {
-                const hits = parseSeries(ability.hits).filter(function (hit) {
-                    return hit[1] > 1 &&
-                        hit[0] >= encounterSelectionStart &&
-                        hit[0] < encounterSelectionEnd;
+            if (isAbility) {
+                const hits = [];
+                entries.forEach(function (entry) {
+                    parseSeries(entry.hits).forEach(function (hit) {
+                        if (hit[1] > 1 &&
+                            hit[0] >= encounterSelectionStart &&
+                            hit[0] < encounterSelectionEnd) {
+                            hits.push({amount: hit[1], target: entry.target});
+                        }
+                    });
                 });
-                const total = hits.reduce(function (sum, hit) {
-                    return sum + hit[1];
-                }, 0);
-                return {
-                    ability: ability.ability,
-                    icon: ability.icon,
-                    hits: hits,
-                    total: total,
-                    average: hits.length ? total / hits.length : 0,
-                    maximum: hits.reduce(function (max, hit) {
-                        return Math.max(max, hit[1]);
-                    }, 0)
-                };
-            }).filter(function (ability) {
-                return ability.hits.length > 0;
-            }).sort(function (left, right) {
-                return right.total - left.total ||
-                    left.ability.localeCompare(right.ability);
-            });
-
-            if (!visibleAbilities.length) {
-                const empty = document.createElement('div');
-                empty.className = 'target-breakdown-tooltip-empty';
-                empty.textContent = 'No damage in the selected time range.';
-                targetBreakdownTooltip.appendChild(empty);
-            }
-            const totalDamage = visibleAbilities.reduce(function (total, ability) {
-                return total + ability.total;
-            }, 0);
-            visibleAbilities.forEach(function (ability) {
-                const row = document.createElement('div');
-                row.className = 'target-breakdown-tooltip-row';
-                const headingRow = document.createElement('div');
-                headingRow.className = 'target-breakdown-tooltip-ability-row';
-                const nameGroup = document.createElement('span');
-                nameGroup.className = 'target-breakdown-tooltip-name-group';
-                let icon = null;
-                if (ability.icon) {
-                    icon = document.createElement('img');
-                    icon.className = 'target-breakdown-tooltip-icon';
-                    icon.src = ability.icon;
-                    icon.alt = '';
-                    icon.setAttribute('aria-hidden', 'true');
+                if (!hits.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'target-breakdown-tooltip-empty';
+                    empty.textContent = 'No ' + action +
+                        ' above 1 in the selected time range.';
+                    targetBreakdownTooltip.appendChild(empty);
+                } else {
+                    const total = hits.reduce(function (sum, hit) {
+                        return sum + hit.amount;
+                    }, 0);
+                    const largest = hits.reduce(function (best, hit) {
+                        return hit.amount > best.amount ||
+                            (hit.amount === best.amount &&
+                                hit.target.localeCompare(best.target) < 0)
+                            ? hit
+                            : best;
+                    });
+                    const smallest = hits.reduce(function (best, hit) {
+                        return hit.amount < best.amount ||
+                            (hit.amount === best.amount &&
+                                hit.target.localeCompare(best.target) < 0)
+                            ? hit
+                            : best;
+                    });
+                    const appendSummary = function (label, value) {
+                        const row = document.createElement('div');
+                        row.className = 'target-breakdown-tooltip-summary-row';
+                        const labelElement = document.createElement('span');
+                        labelElement.className = 'target-breakdown-tooltip-summary-label';
+                        labelElement.textContent = label;
+                        const valueElement = document.createElement('span');
+                        valueElement.className = 'target-breakdown-tooltip-summary-value';
+                        valueElement.textContent = value;
+                        row.append(labelElement, valueElement);
+                        targetBreakdownTooltip.appendChild(row);
+                    };
+                    appendSummary('Total ' + action, numberText(total));
+                    appendSummary('Hits above 1', numberText(hits.length));
+                    appendSummary('Average hit', numberText(total / hits.length));
+                    appendSummary('Largest hit', numberText(largest.amount) +
+                        ' to ' + largest.target);
+                    appendSummary('Smallest hit', numberText(smallest.amount) +
+                        ' to ' + smallest.target);
                 }
-                const name = document.createElement('span');
-                name.className = 'target-breakdown-tooltip-ability';
-                name.textContent = ability.ability;
-                nameGroup.appendChild(name);
-                const total = document.createElement('span');
-                total.className = 'target-breakdown-tooltip-total';
-                total.textContent = numberText(ability.total);
-                headingRow.append(nameGroup, total);
-                const barRow = document.createElement('div');
-                barRow.className = 'target-breakdown-tooltip-bar-row';
-                if (icon) barRow.appendChild(icon);
-                const barTrack = document.createElement('div');
-                barTrack.className = 'target-breakdown-tooltip-bar-track';
-                const bar = document.createElement('div');
-                bar.className = 'target-breakdown-tooltip-bar';
-                bar.style.width = (totalDamage > 0
-                    ? ability.total / totalDamage * 100
-                    : 0).toFixed(1) + '%';
-                barTrack.appendChild(bar);
-                barRow.appendChild(barTrack);
-                const metrics = document.createElement('span');
-                metrics.className = 'target-breakdown-tooltip-metrics';
-                metrics.textContent = 'Avg ' + numberText(ability.average) +
-                    '  ·  Max ' + numberText(ability.maximum);
-                row.append(headingRow, barRow, metrics);
-                targetBreakdownTooltip.appendChild(row);
-            });
+            } else {
+                const visibleEntries = entries.map(function (entry) {
+                    const hits = parseSeries(entry.hits).filter(function (hit) {
+                        return hit[1] > 1 &&
+                            hit[0] >= encounterSelectionStart &&
+                            hit[0] < encounterSelectionEnd;
+                    });
+                    const total = hits.reduce(function (sum, hit) {
+                        return sum + hit[1];
+                    }, 0);
+                    return {
+                        name: entry.ability,
+                        icon: entry.icon,
+                        hits: hits,
+                        total: total,
+                        average: hits.length ? total / hits.length : 0,
+                        maximum: hits.reduce(function (max, hit) {
+                            return Math.max(max, hit[1]);
+                        }, 0)
+                    };
+                }).filter(function (entry) {
+                    return entry.hits.length > 0;
+                }).sort(function (left, right) {
+                    return right.total - left.total ||
+                        left.name.localeCompare(right.name);
+                });
+
+                if (!visibleEntries.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'target-breakdown-tooltip-empty';
+                    empty.textContent = 'No ' + action +
+                        ' above 1 in the selected time range.';
+                    targetBreakdownTooltip.appendChild(empty);
+                }
+                const totalDamage = visibleEntries.reduce(function (total, entry) {
+                    return total + entry.total;
+                }, 0);
+                visibleEntries.forEach(function (entry) {
+                    const row = document.createElement('div');
+                    row.className = 'target-breakdown-tooltip-row';
+                    const headingRow = document.createElement('div');
+                    headingRow.className = 'target-breakdown-tooltip-ability-row';
+                    const nameGroup = document.createElement('span');
+                    nameGroup.className = 'target-breakdown-tooltip-name-group';
+                    let icon = null;
+                    if (entry.icon) {
+                        icon = document.createElement('img');
+                        icon.className = 'target-breakdown-tooltip-icon';
+                        icon.src = entry.icon;
+                        icon.alt = '';
+                        icon.setAttribute('aria-hidden', 'true');
+                    }
+                    const name = document.createElement('span');
+                    name.className = 'target-breakdown-tooltip-ability';
+                    name.textContent = entry.name;
+                    nameGroup.appendChild(name);
+                    const total = document.createElement('span');
+                    total.className = 'target-breakdown-tooltip-total';
+                    total.textContent = numberText(entry.total);
+                    headingRow.append(nameGroup, total);
+                    const barRow = document.createElement('div');
+                    barRow.className = 'target-breakdown-tooltip-bar-row';
+                    if (icon) barRow.appendChild(icon);
+                    const barTrack = document.createElement('div');
+                    barTrack.className = 'target-breakdown-tooltip-bar-track';
+                    const bar = document.createElement('div');
+                    bar.className = 'target-breakdown-tooltip-bar';
+                    bar.style.width = (totalDamage > 0
+                        ? entry.total / totalDamage * 100
+                        : 0).toFixed(1) + '%';
+                    barTrack.appendChild(bar);
+                    barRow.appendChild(barTrack);
+                    const metrics = document.createElement('span');
+                    metrics.className = 'target-breakdown-tooltip-metrics';
+                    metrics.textContent = 'Avg ' + numberText(entry.average) +
+                        '  ·  Max ' + numberText(entry.maximum);
+                    row.append(headingRow, barRow, metrics);
+                    targetBreakdownTooltip.appendChild(row);
+                });
+            }
 
             targetBreakdownTooltip.hidden = false;
             const anchorBounds = anchor.getBoundingClientRect();
@@ -469,36 +536,15 @@
             targetBreakdownTooltip.style.left = left + 'px';
             targetBreakdownTooltip.style.top = Math.max(margin, top) + 'px';
         };
-        const hideTargetBreakdownTooltip = function () {
+        const hideBreakdownTooltip = function () {
             targetBreakdownTooltip.hidden = true;
-            activeTargetBreakdownItem = null;
-            activeTargetBreakdownAnchor = null;
+            activeBreakdownTooltipItem = null;
+            activeBreakdownTooltipAnchor = null;
         };
         const shortNumberText = function (value) {
             if (value >= 1000000) return (value / 1000000).toFixed(1) + 'm';
             if (value >= 1000) return (value / 1000).toFixed(1) + 'k';
             return value.toFixed(0);
-        };
-        const updateAbilityTargetValues = function (list, start, end) {
-            const values = Array.from(list.querySelectorAll('.ability-target-item')).map(
-                function (item) {
-                    return {
-                        item: item,
-                        total: seriesRange(
-                            getElementSeriesStats(item, 'series'), start, end).total
-                    };
-                });
-            const total = values.reduce(function (sum, value) {
-                return sum + value.total;
-            }, 0);
-            values.forEach(function (value) {
-                value.item.hidden = value.total <= 0;
-                value.item.querySelector('.ability-target-amount').textContent =
-                    numberText(value.total);
-                const percent = total > 0 ? value.total / total * 100 : 0;
-                value.item.querySelector('.ability-target-bar').style.width =
-                    Math.max(0, Math.min(100, percent)).toFixed(1) + '%';
-            });
         };
         const updateBreakdownValues = function (row, start, end) {
             const breakdown = document.getElementById(
@@ -532,9 +578,6 @@
             };
             updateGroup('.breakdown-spell');
             updateGroup('.breakdown-target');
-            breakdown.querySelectorAll('.ability-target-list').forEach(function (list) {
-                updateAbilityTargetValues(list, start, end);
-            });
         };
         const updateTwistedSpearBreakdown = function (start, end) {
             const section = document.getElementById('twisted-spear-breakdown');
@@ -702,13 +745,26 @@
                 }
                 return visibleFactionFilters.has('Uncategorized');
             };
+            const searchTerm = abilitySearch.value.trim().toLowerCase();
+            const hasMatchingAbility = function (row) {
+                if (!searchTerm) return true;
+                const breakdown = document.getElementById(
+                    row.querySelector('.toggle-breakdown').dataset.target);
+                if (!breakdown) return false;
+                return Array.from(breakdown.querySelectorAll('.breakdown-spell'))
+                    .some(function (spell) {
+                        return spell.dataset.abilityName.toLowerCase()
+                            .includes(searchTerm);
+                    });
+            };
             rowValues.sort(function (left, right) {
                 if (left.amount !== right.amount) return right.amount - left.amount;
                 return left.row.querySelector('.player-name').textContent.localeCompare(
                     right.row.querySelector('.player-name').textContent);
             });
             const visibleRows = rowValues.filter(function (item) {
-                return item.activeSeconds > 0 && isFactionVisible(item.row);
+                return item.activeSeconds > 0 && isFactionVisible(item.row) &&
+                    hasMatchingAbility(item.row);
             });
             const reportTotal = visibleRows.reduce(function (total, item) {
                 return total + item.amount;
@@ -754,7 +810,8 @@
                 updateBreakdownValues(row, start, end);
                 const breakdown = document.getElementById(
                     row.querySelector('.toggle-breakdown').dataset.target);
-                const visible = item.activeSeconds > 0 && isFactionVisible(row);
+                const visible = item.activeSeconds > 0 && isFactionVisible(row) &&
+                    hasMatchingAbility(row);
                 row.hidden = !visible;
                 if (breakdown && !visible) {
                     breakdown.hidden = true;
@@ -775,9 +832,9 @@
             document.getElementById('selected-start-time').value = clockTextAt(start);
             document.getElementById('selected-end-time').value =
                 clockTextAt(Math.max(start, end - 1));
-            if (activeTargetBreakdownItem && activeTargetBreakdownAnchor) {
-                showTargetBreakdownTooltip(
-                    activeTargetBreakdownItem, activeTargetBreakdownAnchor);
+            if (activeBreakdownTooltipItem && activeBreakdownTooltipAnchor) {
+                showBreakdownTooltip(
+                    activeBreakdownTooltipItem, activeBreakdownTooltipAnchor);
             }
         };
         const resizeCharts = function (root) {
@@ -840,60 +897,54 @@
         factionFilters.forEach(function (filter) {
             filter.addEventListener('change', updateEncounterView);
         });
+        abilitySearch.addEventListener('input', updateEncounterView);
         chartFactionFilters.forEach(function (filter) {
             filter.addEventListener('change', function () {
                 updateHeaderChart(modeSelect.value);
             });
         });
         updateEncounterView();
+        let archerSoundPlayed = false;
+        document.addEventListener('click', function (event) {
+            if (archerSoundPlayed || !(event.target instanceof Element) ||
+                !event.target.closest('.class-icon[data-class="archer"]')) return;
+            archerSoundPlayed = true;
+            const playback = new Audio('../../snd/miger.mp3').play();
+            if (playback && typeof playback.catch === 'function') {
+                playback.catch(function (error) {
+                    console.error('Could not play the Archer click sound.', error);
+                });
+            }
+        });
         document.addEventListener('pointerover', function (event) {
             if (!(event.target instanceof Element)) return;
-            const track = event.target.closest('.target-breakdown-bar');
+            const track = event.target.closest('.breakdown-tooltip-trigger');
             if (!track || (event.relatedTarget instanceof Node &&
                 track.contains(event.relatedTarget))) return;
-            const item = track.closest('.breakdown-target');
-            if (item) showTargetBreakdownTooltip(item, track);
+            const item = track.closest('.breakdown-target, .breakdown-spell');
+            if (item) showBreakdownTooltip(item, track);
         });
         document.addEventListener('pointerout', function (event) {
             if (!(event.target instanceof Element)) return;
-            const track = event.target.closest('.target-breakdown-bar');
+            const track = event.target.closest('.breakdown-tooltip-trigger');
             if (!track || (event.relatedTarget instanceof Node &&
                 track.contains(event.relatedTarget))) return;
-            hideTargetBreakdownTooltip();
+            hideBreakdownTooltip();
         });
         document.addEventListener('focusin', function (event) {
             if (!(event.target instanceof Element)) return;
-            const track = event.target.closest('.target-breakdown-bar');
+            const track = event.target.closest('.breakdown-tooltip-trigger');
             if (!track) return;
-            const item = track.closest('.breakdown-target');
-            if (item) showTargetBreakdownTooltip(item, track);
+            const item = track.closest('.breakdown-target, .breakdown-spell');
+            if (item) showBreakdownTooltip(item, track);
         });
         document.addEventListener('focusout', function (event) {
             if (!(event.target instanceof Element)) return;
-            if (event.target.closest('.target-breakdown-bar')) {
-                hideTargetBreakdownTooltip();
+            if (event.target.closest('.breakdown-tooltip-trigger')) {
+                hideBreakdownTooltip();
             }
         });
         document.addEventListener('click', function (event) {
-            const abilityToggle = event.target.closest('.ability-target-toggle');
-            if (abilityToggle) {
-                const targetList = document.getElementById(
-                    abilityToggle.getAttribute('data-target'));
-                if (!targetList) return;
-                const isExpanded =
-                    abilityToggle.getAttribute('aria-expanded') === 'true';
-                abilityToggle.setAttribute('aria-expanded', String(!isExpanded));
-                abilityToggle.textContent = isExpanded ? '+' : '-';
-                abilityToggle.setAttribute('aria-label', isExpanded
-                    ? 'Show targets damaged by ' + abilityToggle.dataset.ability
-                    : 'Hide targets damaged by ' + abilityToggle.dataset.ability);
-                targetList.hidden = isExpanded;
-                if (!isExpanded) {
-                    updateAbilityTargetValues(
-                        targetList, encounterSelectionStart, encounterSelectionEnd);
-                }
-                return;
-            }
             const toggle = event.target.closest('.toggle-breakdown');
             if (!toggle) return;
             const target = document.getElementById(toggle.getAttribute('data-target'));
